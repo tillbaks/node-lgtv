@@ -6,7 +6,8 @@ lgtv.connect({
   host: "10.0.0.101",
   port: 3000,
   reconnect: true,
-  reconnect_sleep: 5000
+  reconnect_sleep: 5000,
+  client_key_file: "./client-key.txt"
 });
 
 lgtv.on("connect", function () {

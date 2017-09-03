@@ -10,7 +10,8 @@ var config = {
   host: "lgwebostv",
   port: 3000,
   reconnect: false,
-  reconnect_sleep: 5000
+  reconnect_sleep: 5000,
+  client_key_file: "./client-key"
 };
 var ws;
 
@@ -37,6 +38,10 @@ LGTV.send = function (payload) {
 };
 
 LGTV.register = function () {
+  
+  if (fs.existsSync(config.client_key_file)) {
+    pairing_payload["client-key"] = fs.readFileSync(config.client_key_file, "utf8");
+  }
   LGTV.send({
     "type": "register",
     "payload": pairing_payload
@@ -65,7 +70,7 @@ LGTV.subscribe = function (data, cb) {
 
 LGTV.set_client_key = function (key) {
   pairing_payload["client-key"] = key;
-  fs.writeFile("./pairing_payload.json", JSON.stringify(pairing_payload), function (err) {
+  fs.writeFile(config.client_key_file, key, function (err) {
     if (err) {
       LGTV.emit("error", new Error(err));
     }
@@ -73,10 +78,11 @@ LGTV.set_client_key = function (key) {
 };
 
 LGTV.set_config = function (conf) {
-  if (conf.host !== undefined) { config.host = conf.host; }
-  if (conf.port !== undefined) { config.port = conf.port; }
-  if (conf.reconnect !== undefined) { config.reconnect = conf.reconnect; }
-  if (conf.reconnect_sleep !== undefined) { config.reconnect_sleep = conf.reconnect_sleep; }
+  config.host = conf.host || config.host;
+  config.port = conf.port || config.port;
+  config.reconnect = conf.reconnect || config.reconnect;
+  config.reconnect_sleep = conf.reconnect_sleep || config.reconnect_sleep;
+  config.client_key_file = conf.client_key_file || config.client_key_file;
 };
 
 LGTV.connect = function (conf) {
