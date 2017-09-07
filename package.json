@@ -20,5 +20,12 @@
   "bugs": {
     "url": "https://github.com/tillbaks/node-lgtv/issues"
   },
-  "homepage": "https://github.com/tillbaks/node-lgtv#readme"
+  "homepage": "https://github.com/tillbaks/node-lgtv#readme",
+  "eslintConfig": {
+    "extends": "airbnb-base",
+    "rules": {
+      "quotes": ["error", "double"],
+      "no-console": [0]
+    }
+  }
 }

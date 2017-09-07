@@ -1,137 +1,118 @@
-"use strict";
+const fs = require("fs");
+const events = require("events");
 
-var WebSocket = require("ws");
-var async = require("async");
-var events = require("events");
-var fs = require("fs");
-var LGTV = new events.EventEmitter();
-var request_id = 0;
-var config = {
-  host: "lgwebostv",
-  port: 3000,
-  reconnect: false,
-  reconnect_sleep: 5000,
-  client_key_file: "./client-key"
-};
-var ws;
+const WebSocket = require("ws");
+const async = require("async");
 
-var pairing_payload = require('./pairing_payload.json');
+const LGTV = new events.EventEmitter();
+let requestId = 0;
+let ws;
 
-var sent_messages = {};
-var callbacks = {};
-var message_queue = async.queue(function (data, cb) {
-  sent_messages[data.id] = data;
-  callbacks[data.id] = function (response) {
+const pairingPayload = require("./pairingPayload.json");
+
+const sentMessages = {};
+const callbacks = {};
+const messageQueue = async.queue((msg, done) => {
+  const data = msg;
+  requestId += 1;
+  data.id = data.id || requestId;
+  sentMessages[data.id] = data;
+  callbacks[data.id] = (response) => {
     if (data.type === "request") {
-      delete sent_messages[response.id];
+      delete sentMessages[response.id];
       delete callbacks[response.id];
     }
     data.callback(response.payload);
   };
-  LGTV.send(data);
-  cb();
+  ws.send(JSON.stringify(data));
+  done();
 }, 1);
-message_queue.pause();
+messageQueue.pause();
 
-LGTV.send = function (payload) {
-  ws.send(JSON.stringify(payload));
-};
-
-LGTV.register = function () {
-  
-  if (fs.existsSync(config.client_key_file)) {
-    pairing_payload["client-key"] = fs.readFileSync(config.client_key_file, "utf8");
-  }
-  LGTV.send({
-    "type": "register",
-    "payload": pairing_payload
+LGTV.request = function request(data, cb) {
+  messageQueue.push({
+    type: data.type || "request",
+    id: data.id,
+    uri: data.uri || data,
+    payload: data.payload || {},
+    callback: data.callback || cb,
   });
 };
 
-LGTV.request = function (data, cb) {
-  message_queue.push({
-    "type": data.type || "request",
-    "id": data.id || ++request_id,
-    "uri": data.uri || data,
-    "payload": data.payload || {},
-    "callback": data.callback || cb
+LGTV.subscribe = function subscribe(data, cb) {
+  messageQueue.push({
+    type: data.type || "subscribe",
+    id: data.id,
+    uri: data.uri || data,
+    payload: data.payload || {},
+    callback: data.callback || cb,
   });
 };
 
-LGTV.subscribe = function (data, cb) {
-  message_queue.push({
-    "type": data.type || "subscribe",
-    "id": data.id || ++request_id,
-    "uri": data.uri || data,
-    "payload": data.payload || {},
-    "callback": data.callback || cb
-  });
-};
+LGTV.connect = function connect({
+  host = "lgwebostv", port = 3000,
+  reconnect = false, reconnectSleep = 5000,
+  clientKeyFile = "./client-key",
+} = {}) {
+  ws = new WebSocket(`ws://${host}:${port}`);
 
-LGTV.set_client_key = function (key) {
-  pairing_payload["client-key"] = key;
-  fs.writeFile(config.client_key_file, key, function (err) {
-    if (err) {
-      LGTV.emit("error", new Error(err));
+  // Once connected to TV - need to register to be able to send commands
+  ws.on("open", () => {
+    if (fs.existsSync(clientKeyFile)) {
+      pairingPayload["client-key"] = fs.readFileSync(clientKeyFile, "utf8");
     }
-  });
-};
-
-LGTV.set_config = function (conf) {
-  config.host = conf.host || config.host;
-  config.port = conf.port || config.port;
-  config.reconnect = conf.reconnect || config.reconnect;
-  config.reconnect_sleep = conf.reconnect_sleep || config.reconnect_sleep;
-  config.client_key_file = conf.client_key_file || config.client_key_file;
-};
-
-LGTV.connect = function (conf) {
-
-  if (conf !== undefined) { LGTV.set_config(conf); }
-
-  ws = new WebSocket("ws://" + config.host + ":" + config.port);
-
-  ws.on("open", function onConnect() {
-    LGTV.register();
+    ws.send(JSON.stringify({
+      type: "register",
+      payload: pairingPayload,
+    }));
   });
 
-  ws.on("close", function onClose() {
-    message_queue.pause();
+  ws.on("close", () => {
+    messageQueue.pause();
     LGTV.emit("close");
-    if (config.reconnect) {
-      setTimeout(function () {
-        LGTV.connect(config);
-      }, config.reconnect_sleep);
+    if (reconnect) {
+      setTimeout(() => {
+        LGTV.connect({
+          host, port, reconnect, reconnectSleep, clientKeyFile,
+        });
+      }, reconnectSleep);
     }
   });
 
-  ws.on("error", function onError(err) {
-    message_queue.pause();
+  ws.on("error", (err) => {
+    messageQueue.pause();
     LGTV.emit("error", new Error(err));
   });
 
-  ws.on("message", function onData(data) {
+  ws.on("message", (data) => {
+    let jsonData;
     try {
-      data = JSON.parse(data);
+      jsonData = JSON.parse(data);
     } catch (e) {
+      LGTV.emit("error", new Error(e));
       return;
     }
-    if (data.type === "registered") {
+    if (jsonData.type === "registered") {
       LGTV.emit("connect");
-      if (pairing_payload["client-key"] === undefined) {
-        LGTV.set_client_key(data["payload"]["client-key"]);
+      if (pairingPayload["client-key"] === undefined) {
+        console.log(jsonData);
+        fs.writeFile(clientKeyFile, jsonData.payload["client-key"], (err) => {
+          if (err) {
+            LGTV.emit("error", new Error(err));
+          }
+        });
       }
-      message_queue.resume();
-      Object.keys(sent_messages).forEach(function (id) {
-        LGTV.subscribe(sent_messages[id]); // Need to subcribe again if re-connection happened
+      messageQueue.resume();
+      Object.keys(sentMessages).forEach((id) => {
+        LGTV.subscribe(sentMessages[id]); // Need to subcribe again if re-connection happened
       });
-    } else if (sent_messages[data.id] !== undefined) {
-      callbacks[data.id](data);
+    } else if (sentMessages[jsonData.id] !== undefined) {
+      callbacks[jsonData.id](jsonData);
     }
   });
 };
 
-LGTV.close = function () {
+LGTV.close = function close() {
   ws.close();
 };
 

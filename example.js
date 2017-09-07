@@ -1,44 +1,40 @@
-"use strict";
-var util = require("util"),
-  lgtv = require("./lgtv");
+const lgtv = require("./lgtv");
 
 lgtv.connect({
   host: "10.0.0.101",
   port: 3000,
   reconnect: true,
-  reconnect_sleep: 5000,
-  client_key_file: "./client-key.txt"
+  reconnectSleep: 5000,
+  clientKeyFile: "./client-key.txt",
 });
 
-lgtv.on("connect", function () {
+lgtv.on("connect", () => {
   console.log("connected to lgtv!");
 });
 
-lgtv.on("close", function () {
+lgtv.on("close", () => {
   console.log("disconnected from lgtv");
 });
 
-lgtv.on("error", function (error) {
+lgtv.on("error", (error) => {
   console.log("error from lgtv");
   console.log(error);
 });
 
 // Requests and subscriptions are put in a queue and
 // run when connection is available
-
-lgtv.request("ssap://audio/getVolume", function (res) {
-  console.log("Received response: " + JSON.stringify(res));
+lgtv.subscribe({ uri: "ssap://com.webos.applicationManager/getForegroundAppInfo" }, (res) => {
+  console.log(`Received response: ${JSON.stringify(res)}`);
 });
 
-lgtv.subscribe("ssap://audio/getVolume", function (res) {
-  console.log("Received response: " + JSON.stringify(res));
+lgtv.subscribe("ssap://audio/getVolume", (res) => {
+  console.log(`Received response: ${JSON.stringify(res)}`);
 
   if (res.changed && res.changed.indexOf("volume") >= 0) {
-    console.log("volume changed: " + res.cause);
-    lgtv.close(); // Will reconnect after 5 seconds
+    console.log(`Volume changed: ${res.cause}`);
+    lgtv.close(); // Will reconnect after 5 seconds since reconnect is true
   }
   if (res.changed && res.changed.indexOf("muted") >= 0) {
-    console.log("mute changed to: " + res.muted);
+    console.log(`Mute changed: ${res.muted}`);
   }
-
 });
