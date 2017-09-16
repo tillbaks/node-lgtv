@@ -7,6 +7,7 @@ const async = require("async");
 const LGTV = new events.EventEmitter();
 let requestId = 0;
 let ws;
+let wsInput;
 
 const pairingPayload = require("./pairingPayload.json");
 
@@ -14,8 +15,6 @@ const sentMessages = {};
 const callbacks = {};
 const messageQueue = async.queue((msg, done) => {
   const data = msg;
-  requestId += 1;
-  data.id = data.id || requestId;
   sentMessages[data.id] = data;
   callbacks[data.id] = (response) => {
     if (data.type === "request") {
@@ -30,19 +29,24 @@ const messageQueue = async.queue((msg, done) => {
 messageQueue.pause();
 
 LGTV.request = function request(data, cb) {
-  messageQueue.push({
-    type: data.type || "request",
-    id: data.id,
-    uri: data.uri || data,
-    payload: data.payload || {},
-    callback: data.callback || cb,
-  });
+  if (typeof data !== "string" && data.type === "button") {
+    if (wsInput) wsInput.send(`type:${data.type}\nname:${data.name}\n\n`);
+    if (cb) cb();
+  } else {
+    messageQueue.push({
+      type: "request",
+      id: data.id || (requestId += 1),
+      uri: data.uri || data,
+      payload: data.payload || {},
+      callback: data.callback || cb,
+    });
+  }
 };
 
 LGTV.subscribe = function subscribe(data, cb) {
   messageQueue.push({
-    type: data.type || "subscribe",
-    id: data.id,
+    type: "subscribe",
+    id: data.id || (requestId += 1),
     uri: data.uri || data,
     payload: data.payload || {},
     callback: data.callback || cb,
@@ -50,11 +54,11 @@ LGTV.subscribe = function subscribe(data, cb) {
 };
 
 LGTV.connect = function connect({
-  host = "lgwebostv", port = 3000,
+  host = "lgwebostv", port = 3001,
   reconnect = false, reconnectSleep = 5000,
   clientKeyFile = "./client-key",
 } = {}) {
-  ws = new WebSocket(`ws://${host}:${port}`);
+  ws = new WebSocket(`wss://${host}:${port}`, { rejectUnauthorized: false });
 
   // Once connected to TV - need to register to be able to send commands
   ws.on("open", () => {
@@ -93,16 +97,29 @@ LGTV.connect = function connect({
       return;
     }
     if (jsonData.type === "registered") {
-      LGTV.emit("connect");
+      messageQueue.resume();
+      LGTV.request("ssap://com.webos.service.networkinput/getPointerInputSocket", (res) => {
+        wsInput = new WebSocket(res.socketPath, { rejectUnauthorized: false });
+        wsInput.on("open", () => {
+          LGTV.emit("connect");
+        });
+        wsInput.on("error", (err) => {
+          messageQueue.pause();
+          LGTV.emit("error", new Error(err));
+          LGTV.close();
+        });
+        wsInput.on("close", () => {
+          LGTV.close();
+        });
+        wsInput.on("message", msg => console.log(msg));
+      });
       if (pairingPayload["client-key"] === undefined) {
-        console.log(jsonData);
         fs.writeFile(clientKeyFile, jsonData.payload["client-key"], (err) => {
           if (err) {
             LGTV.emit("error", new Error(err));
           }
         });
       }
-      messageQueue.resume();
       Object.keys(sentMessages).forEach((id) => {
         LGTV.subscribe(sentMessages[id]); // Need to subcribe again if re-connection happened
       });
