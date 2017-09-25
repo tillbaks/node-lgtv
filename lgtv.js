@@ -53,10 +53,18 @@ LGTV.subscribe = function subscribe(data, cb) {
   });
 };
 
+LGTV.options = {
+  host: "lgwebostv",
+  port: 3001,
+  reconnect: false,
+  reconnectSleep: 5000,
+  clientKeyFile: "./client-key",
+};
+
 LGTV.connect = function connect({
-  host = "lgwebostv", port = 3001,
-  reconnect = false, reconnectSleep = 5000,
-  clientKeyFile = "./client-key",
+  host = LGTV.options.host, port = LGTV.options.port,
+  reconnect = LGTV.options.reconnect, reconnectSleep = LGTV.options.reconnectSleep,
+  clientKeyFile = LGTV.options.clientKeyFile,
 } = {}) {
   ws = new WebSocket(`wss://${host}:${port}`, { rejectUnauthorized: false });
 
