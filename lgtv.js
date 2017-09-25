@@ -130,7 +130,9 @@ LGTV.connect = function connect({
 };
 
 LGTV.close = function close() {
-  ws.close();
+  if (ws) {
+    ws.close();
+  }
 };
 
 module.exports = LGTV;
