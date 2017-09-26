@@ -53,7 +53,7 @@ LGTV.subscribe = function subscribe(data, cb) {
   });
 };
 
-LGTV.options = {
+const config = {
   host: "lgwebostv",
   port: 3001,
   reconnect: false,
@@ -61,11 +61,23 @@ LGTV.options = {
   clientKeyFile: "./client-key",
 };
 
-LGTV.connect = function connect({
-  host = LGTV.options.host, port = LGTV.options.port,
-  reconnect = LGTV.options.reconnect, reconnectSleep = LGTV.options.reconnectSleep,
-  clientKeyFile = LGTV.options.clientKeyFile,
-} = {}) {
+LGTV.setConfig = ({
+  host = config.host, port = config.port,
+  reconnect = config.reconnect, reconnectSleep = config.reconnectSleep,
+  clientKeyFile = config.clientKeyFile,
+} = config) => {
+  config.host = host;
+  config.port = port;
+  config.reconnect = reconnect;
+  config.reconnectSleep = reconnectSleep;
+  config.clientKeyFile = clientKeyFile;
+  return config;
+};
+
+LGTV.connect = function connect(...args) {
+  const {
+    host, port, reconnect, reconnectSleep, clientKeyFile,
+  } = LGTV.setConfig(args);
   ws = new WebSocket(`wss://${host}:${port}`, { rejectUnauthorized: false });
 
   // Once connected to TV - need to register to be able to send commands
