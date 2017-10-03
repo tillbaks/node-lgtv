@@ -29,9 +29,19 @@ const messageQueue = async.queue((msg, done) => {
 messageQueue.pause();
 
 LGTV.request = function request(data, cb) {
-  if (typeof data !== "string" && data.type === "button") {
-    if (wsInput) wsInput.send(`type:${data.type}\nname:${data.name}\n\n`);
-    if (cb) cb();
+  if (typeof data !== "string") {
+    let sendData = `type:${data.type}`;
+    if (data.type === "button") {
+      sendData += `\nname:${data.name}`;
+    } else if (data.type === "move") {
+      const [dx, dy] = data.value.split(",");
+      sendData += `\ndx:${dx}\ndy:${dy}\ndown:0`;
+    } else if (data.type === "scroll") {
+      sendData += `\ndx:0\ndy:${data.value}\ndown:0`;
+    }
+    sendData += "\n\n";
+    if (wsInput) { wsInput.send(sendData); }
+    if (cb) { cb(); }
   } else {
     messageQueue.push({
       type: "request",
