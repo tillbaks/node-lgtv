@@ -29,7 +29,23 @@ const messageQueue = async.queue((msg, done) => {
 messageQueue.pause();
 
 LGTV.request = function request(data, cb) {
-  if (typeof data !== "string") {
+  if (typeof data === "string") {
+    messageQueue.push({
+      type: "request",
+      id: (requestId += 1),
+      uri: data,
+      payload: {},
+      callback: cb,
+    });
+  } else if (!data.type || data.type === "request") {
+    messageQueue.push({
+      type: "request",
+      id: data.id || (requestId += 1),
+      uri: data.uri,
+      payload: data.payload || {},
+      callback: data.callback || cb,
+    });
+  } else {
     let sendData = `type:${data.type}`;
     if (data.type === "button") {
       sendData += `\nname:${data.name}`;
@@ -42,14 +58,6 @@ LGTV.request = function request(data, cb) {
     sendData += "\n\n";
     if (wsInput) { wsInput.send(sendData); }
     if (cb) { cb(); }
-  } else {
-    messageQueue.push({
-      type: "request",
-      id: data.id || (requestId += 1),
-      uri: data.uri || data,
-      payload: data.payload || {},
-      callback: data.callback || cb,
-    });
   }
 };
 
