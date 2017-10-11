@@ -15,11 +15,6 @@ const sentMessages = {};
 const callbacks = {};
 const messageQueue = async.queue((msg, done) => {
   const data = msg;
-  if (data.type === "specialSocket") {
-    wsSpecial.send(msg.data);
-    if (msg.callback) { msg.callback(); }
-    return done();
-  }
   sentMessages[data.id] = data;
   callbacks[data.id] = (response) => {
     if (data.type === "request") {
@@ -29,9 +24,16 @@ const messageQueue = async.queue((msg, done) => {
     data.callback(response.payload);
   };
   ws.send(JSON.stringify(data));
-  return done();
+  done();
 }, 1);
+const specialQueue = async.queue((msg, done) => {
+  wsSpecial.send(msg.data);
+  if (msg.callback) { msg.callback(); }
+  done();
+}, 1);
+
 messageQueue.pause();
+specialQueue.pause();
 
 LGTV.request = function request(data, cb) {
   if (typeof data === "string") {
@@ -61,7 +63,7 @@ LGTV.request = function request(data, cb) {
       sendData += `\ndx:0\ndy:${data.value}\ndown:0`;
     }
     sendData += "\n\n";
-    messageQueue.push({
+    specialQueue.push({
       type: "specialSocket",
       data: sendData,
       callback: data.callback || cb,
@@ -119,6 +121,7 @@ LGTV.connect = function connect(...args) {
 
   ws.on("close", () => {
     messageQueue.pause();
+    specialQueue.pause();
     LGTV.emit("close");
     if (reconnect) {
       setTimeout(() => {
@@ -131,6 +134,7 @@ LGTV.connect = function connect(...args) {
 
   ws.on("error", (err) => {
     messageQueue.pause();
+    specialQueue.pause();
     LGTV.emit("error", new Error(err));
   });
 
@@ -143,19 +147,20 @@ LGTV.connect = function connect(...args) {
       return;
     }
     if (jsonData.type === "registered") {
+      messageQueue.resume();
       LGTV.request("ssap://com.webos.service.networkinput/getPointerInputSocket", (res) => {
         wsSpecial = new WebSocket(res.socketPath, { rejectUnauthorized: false });
         wsSpecial.on("open", () => {
-          messageQueue.resume();
+          specialQueue.resume();
           LGTV.emit("connect");
         });
         wsSpecial.on("error", (err) => {
-          messageQueue.pause();
+          specialQueue.pause();
           LGTV.emit("error", new Error(err));
           LGTV.close();
         });
         wsSpecial.on("close", () => {
-          messageQueue.pause();
+          specialQueue.pause();
           LGTV.close();
         });
         wsSpecial.on("message", msg => console.log(msg));
@@ -182,6 +187,7 @@ LGTV.close = function close() {
   }
 
   messageQueue.pause();
+  specialQueue.pause();
 };
 
 module.exports = LGTV;
