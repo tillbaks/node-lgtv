@@ -7,7 +7,7 @@ const async = require("async");
 const LGTV = new events.EventEmitter();
 let requestId = 0;
 let ws;
-let wsInput;
+let wsSpecial;
 
 const pairingPayload = require("./pairingPayload.json");
 
@@ -15,6 +15,11 @@ const sentMessages = {};
 const callbacks = {};
 const messageQueue = async.queue((msg, done) => {
   const data = msg;
+  if (data.type === "specialSocket") {
+    wsSpecial.send(msg.data);
+    if (msg.callback) { msg.callback(); }
+    return done();
+  }
   sentMessages[data.id] = data;
   callbacks[data.id] = (response) => {
     if (data.type === "request") {
@@ -24,7 +29,7 @@ const messageQueue = async.queue((msg, done) => {
     data.callback(response.payload);
   };
   ws.send(JSON.stringify(data));
-  done();
+  return done();
 }, 1);
 messageQueue.pause();
 
@@ -56,8 +61,11 @@ LGTV.request = function request(data, cb) {
       sendData += `\ndx:0\ndy:${data.value}\ndown:0`;
     }
     sendData += "\n\n";
-    if (wsInput) { wsInput.send(sendData); }
-    if (cb) { cb(); }
+    messageQueue.push({
+      type: "specialSocket",
+      data: sendData,
+      callback: data.callback || cb,
+    });
   }
 };
 
@@ -135,21 +143,22 @@ LGTV.connect = function connect(...args) {
       return;
     }
     if (jsonData.type === "registered") {
-      messageQueue.resume();
       LGTV.request("ssap://com.webos.service.networkinput/getPointerInputSocket", (res) => {
-        wsInput = new WebSocket(res.socketPath, { rejectUnauthorized: false });
-        wsInput.on("open", () => {
+        wsSpecial = new WebSocket(res.socketPath, { rejectUnauthorized: false });
+        wsSpecial.on("open", () => {
+          messageQueue.resume();
           LGTV.emit("connect");
         });
-        wsInput.on("error", (err) => {
+        wsSpecial.on("error", (err) => {
           messageQueue.pause();
           LGTV.emit("error", new Error(err));
           LGTV.close();
         });
-        wsInput.on("close", () => {
+        wsSpecial.on("close", () => {
+          messageQueue.pause();
           LGTV.close();
         });
-        wsInput.on("message", msg => console.log(msg));
+        wsSpecial.on("message", msg => console.log(msg));
       });
       if (pairingPayload["client-key"] === undefined) {
         fs.writeFile(clientKeyFile, jsonData.payload["client-key"], (err) => {
@@ -171,6 +180,8 @@ LGTV.close = function close() {
   if (ws) {
     ws.close();
   }
+
+  messageQueue.pause();
 };
 
 module.exports = LGTV;
