@@ -1,193 +1,196 @@
-const fs = require("fs");
-const events = require("events");
-
-const WebSocket = require("ws");
-const async = require("async");
-
-const LGTV = new events.EventEmitter();
-let requestId = 0;
-let ws;
-let wsSpecial;
+const fs = require("fs")
+const events = require("events")
+const WebSocket = require("ws")
 
 const pairingPayload = require("./pairingPayload.json");
 
-const sentMessages = {};
-const callbacks = {};
-const messageQueue = async.queue((msg, done) => {
-  const data = msg;
-  sentMessages[data.id] = data;
-  callbacks[data.id] = (response) => {
-    if (data.type === "request") {
-      delete sentMessages[response.id];
-      delete callbacks[response.id];
-    }
-    data.callback(response.payload);
-  };
-  ws.send(JSON.stringify(data));
-  done();
-}, 1);
-const specialQueue = async.queue((msg, done) => {
-  wsSpecial.send(msg.data);
-  if (msg.callback) { msg.callback(); }
-  done();
-}, 1);
+const lgtv = new events.EventEmitter()
+let requestId = 0
+let lgtvSocket
+let pointerSocket
+let waitingForResponse = {}
+let subscribtions = {}
+let keyFile = "./client-key"
 
-messageQueue.pause();
-specialQueue.pause();
-
-LGTV.request = function request(data, cb) {
-  if (typeof data === "string") {
-    messageQueue.push({
-      type: "request",
-      id: (requestId += 1),
-      uri: data,
-      payload: {},
-      callback: cb,
-    });
-  } else if (!data.type || data.type === "request") {
-    messageQueue.push({
-      type: "request",
-      id: data.id || (requestId += 1),
-      uri: data.uri,
-      payload: data.payload || {},
-      callback: data.callback || cb,
-    });
-  } else {
-    let sendData = `type:${data.type}`;
-    if (data.type === "button") {
-      sendData += `\nname:${data.name}`;
-    } else if (data.type === "move") {
-      const [dx, dy] = data.value.split(",");
-      sendData += `\ndx:${dx}\ndy:${dy}\ndown:0`;
-    } else if (data.type === "scroll") {
-      sendData += `\ndx:0\ndy:${data.value}\ndown:0`;
-    }
-    sendData += "\n\n";
-    specialQueue.push({
-      type: "specialSocket",
-      data: sendData,
-      callback: data.callback || cb,
-    });
+const onConnected = () => {
+  lgtv.emit("connected")
+  if (fs.existsSync(keyFile)) {
+    pairingPayload["client-key"] = fs.readFileSync(keyFile, "utf8");
   }
-};
+  lgtvSocket.send(JSON.stringify({
+    type: "register",
+    payload: pairingPayload,
+  }))
+}
 
-LGTV.subscribe = function subscribe(data, cb) {
-  messageQueue.push({
-    type: "subscribe",
-    id: data.id || (requestId += 1),
-    uri: data.uri || data,
-    payload: data.payload || {},
-    callback: data.callback || cb,
-  });
-};
+const onClosed = () => {
+  lgtv.emit("close")
+  subscribtions = {}
+  waitingForResponse = {}
+  lgtvSocket.removeListener("open", onConnected)
+  lgtvSocket.removeListener("close", onClosed)
+  lgtvSocket.removeListener("error", onError)
+  lgtvSocket.removeListener("message", onMessage)
+  lgtvSocket = undefined
+}
 
-const config = {
-  host: "lgwebostv",
-  port: 3001,
-  reconnect: false,
-  reconnectSleep: 5000,
-  clientKeyFile: "./client-key",
-};
+const onError = (error) => lgtv.emit("error", error)
 
-LGTV.setConfig = ({
-  host = config.host, port = config.port,
-  reconnect = config.reconnect, reconnectSleep = config.reconnectSleep,
-  clientKeyFile = config.clientKeyFile,
-} = config) => {
-  config.host = host;
-  config.port = port;
-  config.reconnect = reconnect;
-  config.reconnectSleep = reconnectSleep;
-  config.clientKeyFile = clientKeyFile;
-  return config;
-};
+const onRegistered = (payload) => {
+  lgtv.emit("registered")
+  if (pairingPayload["client-key"] === undefined) {
+    fs.writeFile(keyFile, payload["client-key"], (err) => {
+      if (err) {
+        lgtv.emit("error", new Error(err))
+      }
+    })
+  }
+}
 
-LGTV.connect = function connect(...args) {
-  const {
-    host, port, reconnect, reconnectSleep, clientKeyFile,
-  } = LGTV.setConfig(args);
-  ws = new WebSocket(`wss://${host}:${port}`, { rejectUnauthorized: false });
+const onMessage = (message) => {
+  if (waitingForResponse[message.id] !== undefined) {
+    // TODO: Reject on error response
+    waitingForResponse[message.id].resolve(message.payload)
+    delete waitingForResponse[message.id]
+  } else if (subscribtions[message.id] !== undefined) {
+    // TODO: Remove subscribtion on error response?
+    subscribtions[message.id](message.payload)
+  }
+}
 
-  // Once connected to TV - need to register to be able to send commands
-  ws.on("open", () => {
-    if (fs.existsSync(clientKeyFile)) {
-      pairingPayload["client-key"] = fs.readFileSync(clientKeyFile, "utf8");
-    }
-    ws.send(JSON.stringify({
-      type: "register",
-      payload: pairingPayload,
-    }));
-  });
-
-  ws.on("close", () => {
-    messageQueue.pause();
-    specialQueue.pause();
-    LGTV.emit("close");
-    if (reconnect) {
-      setTimeout(() => {
-        LGTV.connect({
-          host, port, reconnect, reconnectSleep, clientKeyFile,
-        });
-      }, reconnectSleep);
-    }
-  });
-
-  ws.on("error", (err) => {
-    messageQueue.pause();
-    specialQueue.pause();
-    LGTV.emit("error", new Error(err));
-  });
-
-  ws.on("message", (data) => {
-    let jsonData;
+lgtv.connect = ({host, port, clientKeyFile}) => {
+  lgtv.emit("connecting")
+    keyFile = clientKeyFile
+  lgtvSocket = new WebSocket(`lgtvSockets://${host}:${port || 3000}`, { rejectUnauthorized: false })
+  lgtvSocket.on("open", onConnected)
+  lgtvSocket.on("close", onClosed)
+  lgtvSocket.on("error", onError)
+  lgtvSocket.on("message", (data) => {
+    let message;
     try {
-      jsonData = JSON.parse(data);
+      message = JSON.parse(data);
     } catch (e) {
-      LGTV.emit("error", new Error(e));
+      lgtv.emit("error", new Error(e));
       return;
     }
-    if (jsonData.type === "registered") {
-      messageQueue.resume();
-      LGTV.request("ssap://com.webos.service.networkinput/getPointerInputSocket", (res) => {
-        wsSpecial = new WebSocket(res.socketPath, { rejectUnauthorized: false });
-        wsSpecial.on("open", () => {
-          specialQueue.resume();
-          LGTV.emit("connect");
-        });
-        wsSpecial.on("error", (err) => {
-          specialQueue.pause();
-          LGTV.emit("error", new Error(err));
-          LGTV.close();
-        });
-        wsSpecial.on("close", () => {
-          specialQueue.pause();
-          LGTV.close();
-        });
-        wsSpecial.on("message", msg => console.log(msg));
-      });
-      if (pairingPayload["client-key"] === undefined) {
-        fs.writeFile(clientKeyFile, jsonData.payload["client-key"], (err) => {
-          if (err) {
-            LGTV.emit("error", new Error(err));
-          }
-        });
-      }
-      Object.keys(sentMessages).forEach((id) => {
-        LGTV.subscribe(sentMessages[id]); // Need to subcribe again if re-connection happened
-      });
-    } else if (sentMessages[jsonData.id] !== undefined) {
-      callbacks[jsonData.id](jsonData);
+    if (message.type === "registered") {
+      onRegistered(message.payload)
+    } else {
+      onMessage(message)
     }
-  });
+  })
+}
+
+lgtv.close = function close() {
+  if (lgtvSocket && lgtvSocket.readyState !== WebSocket.CLOSED) {
+    lgtvSocket.terminate()
+  }
 };
 
-LGTV.close = function close() {
-  if (ws) {
-    ws.close();
+lgtv.request = (data) => new Promise((resolve, reject) => {
+    if (lgtvSocket === undefined || lgtvSocket.readyState !== WebSocket.OPEN) {
+      reject(new Error("Not connected."))
+      return
+    }
+    if (typeof data === "string") {
+      data = { uri: data }
+    }
+    data.type = "request"
+    data.id = (requestId += 1)
+    data.payload = data.payload || {}
+    lgtvSocket.send(JSON.stringify(data), (error) => {
+      if (error) reject(error)
+      else waitingForResponse[data.id] = {resolve, reject, time: new Date()}
+    })
+})
+
+lgtv.subscribe = (data, callback) => {
+    if (lgtvSocket === undefined || lgtvSocket.readyState !== WebSocket.OPEN) {
+      reject(new Error("Not connected."))
+      return
+    }
+    if (typeof data === "string") {
+      data = { uri: data }
+    }
+    data.type = "subscribe"
+    data.id = (requestId += 1)
+    data.payload = data.payload || {}
+    lgtvSocket.send(JSON.stringify(data), (error) => {
+      if (error) lgtv.emit("error", new Error(error))
+      else subscribtions[data.id] = callback
+    })
+}
+
+// Pointer Input
+
+const getPointerInputSocket = () => new Promise(async (resolve, reject) => {
+  if (pointerSocket && pointerSocket.readyState === WebSocket.OPEN) {
+    resolve(pointerSocket)
+    return
   }
 
-  messageQueue.pause();
-  specialQueue.pause();
-};
+  const onError = (error) => {
+    pointerSocket.removeListener("open", onOpen)
+    pointerSocket.removeListener("error", onError)
+    reject(error)
+  }
 
-module.exports = LGTV;
+  const onOpen = () => {
+    pointerSocket.removeListener("open", onOpen)
+    pointerSocket.removeListener("error", onError)
+    resolve(pointerSocket)
+  }
+
+  const onClosed = () => {
+    pointerSocket.removeListener("close", onClosed)
+    pointerSocket = undefined
+  }
+
+  try {
+    const response = await lgtv.request("ssap://com.webos.service.networkinput/getPointerInputSocket")
+    pointerSocket = new WebSocket(response.socketPath, { rejectUnauthorized: false })
+    pointerSocket.on("open", onOpen)
+    pointerSocket.on("error", onError)
+    pointerSocket.on("close", onClosed)
+  } catch (error) {
+    reject(error)
+  }
+})
+
+lgtv.button = (button) => new Promise(async (resolve, reject) => {
+  try {
+    socket = await getPointerInputSocket()
+    socket.send(`type:button\nname:${button}\n\n`, (error) => {
+      if (error) reject (error)
+      else resolve()
+    })
+  } catch (error) {
+    reject(error)
+  }
+})
+
+lgtv.move = (x, y) => new Promise(async (resolve, reject) => {
+  try {
+    socket = await getPointerInputSocket()
+    socket.send(`type:move\ndx:${x}\ndy:${y}\ndown:0\n\n`, (error) => {
+      if (error) reject (error)
+      else resolve()
+    })
+  } catch (error) {
+    reject(error)
+  }
+})
+
+lgtv.scroll = (value) => new Promise(async (resolve, reject) => {
+  try {
+    socket = await getPointerInputSocket()
+    socket.send(`type:scroll\ndx:0\ndy:${value}\ndown:0\n\n`, (error) => {
+      if (error) reject (error)
+      else resolve()
+    })
+  } catch (error) {
+    reject(error)
+  }
+})
+
+module.exports = lgtv

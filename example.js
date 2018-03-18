@@ -1,15 +1,29 @@
 const lgtv = require("./lgtv");
 
 lgtv.connect({
-  host: "10.0.0.101",
-  port: 3000,
+  host: "10.0.0.4",
+  port: 3001,
   reconnect: true,
   reconnectSleep: 5000,
   clientKeyFile: "./client-key.txt",
 });
 
 lgtv.on("connect", () => {
-  console.log("connected to lgtv!");
+  console.log("connected to lgtv but pairing not done");
+});
+
+lgtv.on("registered", async () => {
+  console.log("registered to lgtv - pairing ok");
+  try {
+    // Switch to youtube app
+    const res = await lgtv.request({ uri: "ssap://com.webos.applicationManager/launch", payload: { id: "youtube.leanback.v4" } })
+    console.log("log:debug", "LGTV response:", res);
+
+    // Send the home button
+    await lgtv.move("HOME")
+  } catch (error) {
+    console.log("Error from lgtv:", error)
+  }
 });
 
 lgtv.on("close", () => {
@@ -17,12 +31,16 @@ lgtv.on("close", () => {
 });
 
 lgtv.on("error", (error) => {
-  console.log("error from lgtv");
-  console.log(error);
+  console.log("error from lgtv", error);
 });
 
 // Requests and subscriptions are put in a queue and
 // run when connection is available
+
+lgtv.subscribe({ uri: "ssap://com.webos.service.mrcu/sensor/getSensorData" }, (res) => {
+  console.log(`Received response: ${JSON.stringify(res)}`);
+});
+
 lgtv.subscribe({ uri: "ssap://com.webos.applicationManager/getForegroundAppInfo" }, (res) => {
   console.log(`Received response: ${JSON.stringify(res)}`);
 });
