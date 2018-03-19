@@ -59,6 +59,7 @@ const onMessage = (message) => {
 }
 
 lgtv.connect = ({host, port, clientKeyFile}) => {
+  lgtv.close()
   lgtv.emit('connecting')
   keyFile = clientKeyFile
   lgtvSocket = new WebSocket(`lgtvSockets://${host}:${port || 3000}`, { rejectUnauthorized: false })
@@ -81,7 +82,7 @@ lgtv.connect = ({host, port, clientKeyFile}) => {
   })
 }
 
-lgtv.close = function close () {
+lgtv.close = () => {
   if (lgtvSocket && lgtvSocket.readyState !== WebSocket.CLOSED) {
     lgtvSocket.terminate()
   }
