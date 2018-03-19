@@ -48,38 +48,44 @@ const onRegistered = (payload) => {
 }
 
 const onMessage = (message) => {
-  if (waitingForResponse[message.id] !== undefined) {
-    // TODO: Reject on error response
-    waitingForResponse[message.id].resolve(message.payload)
-    delete waitingForResponse[message.id]
-  } else if (subscribtions[message.id] !== undefined) {
-    // TODO: Remove subscribtion on error response?
-    subscribtions[message.id](message.payload)
+  try {
+    message = JSON.parse(message)
+  } catch (e) {
+    lgtv.emit('error', new Error(e))
+    return
+  }
+  if (message.type === 'registered') {
+    onRegistered(message.payload)
+  } else {
+    if (waitingForResponse[message.id] !== undefined) {
+      // TODO: Reject on error response
+      waitingForResponse[message.id].resolve(message.payload)
+      delete waitingForResponse[message.id]
+    } else if (subscribtions[message.id] !== undefined) {
+      // TODO: Remove subscribtion on error response?
+      subscribtions[message.id](message.payload)
+    }
   }
 }
 
 lgtv.connect = ({host, port, clientKeyFile}) => {
-  lgtv.close()
+  if (lgtvSocket && lgtvSocket.readyState !== WebSocket.CLOSED) {
+    subscribtions = {}
+    waitingForResponse = {}
+    lgtvSocket.removeListener('open', onConnected)
+    lgtvSocket.removeListener('close', onClosed)
+    lgtvSocket.removeListener('error', onError)
+    lgtvSocket.removeListener('message', onMessage)
+    lgtvSocket.terminate()
+    lgtvSocket = undefined
+  }
   lgtv.emit('connecting')
   keyFile = clientKeyFile
   lgtvSocket = new WebSocket(`lgtvSockets://${host}:${port || 3000}`, { rejectUnauthorized: false })
   lgtvSocket.on('open', onConnected)
   lgtvSocket.on('close', onClosed)
   lgtvSocket.on('error', onError)
-  lgtvSocket.on('message', (data) => {
-    let message
-    try {
-      message = JSON.parse(data)
-    } catch (e) {
-      lgtv.emit('error', new Error(e))
-      return
-    }
-    if (message.type === 'registered') {
-      onRegistered(message.payload)
-    } else {
-      onMessage(message)
-    }
-  })
+  lgtvSocket.on('message', onMessage)
 }
 
 lgtv.close = () => {
