@@ -3,11 +3,6 @@
   "version": "1.0.0",
   "description": "node.js module for controling LG WebOS TVs",
   "main": "lgtv.js",
-  "dependencies": {
-    "async": "^2.5.0",
-    "ws": "^3.1.0"
-  },
-  "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -21,11 +16,10 @@
     "url": "https://github.com/tillbaks/node-lgtv/issues"
   },
   "homepage": "https://github.com/tillbaks/node-lgtv#readme",
-  "eslintConfig": {
-    "extends": "airbnb-base",
-    "rules": {
-      "quotes": ["error", "double"],
-      "no-console": [0]
-    }
+  "dependencies": {
+    "ws": "^5.0.0"
+  },
+  "devDependencies": {
+    "standard": "^11.0.1"
   }
 }
