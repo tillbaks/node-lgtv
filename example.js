@@ -2,9 +2,6 @@ const lgtv = require("./lgtv");
 
 lgtv.connect({
   host: "10.0.0.4",
-  port: 3001,
-  reconnect: true,
-  reconnectSleep: 5000,
   clientKeyFile: "./client-key.txt",
 });
 
@@ -24,6 +21,27 @@ lgtv.on("registered", async () => {
   } catch (error) {
     console.log("Error from lgtv:", error)
   }
+
+  // Subscribe to changes
+  lgtv.subscribe({ uri: "ssap://com.webos.service.mrcu/sensor/getSensorData" }, (res) => {
+    console.log(`Received response: ${JSON.stringify(res)}`);
+  });
+
+  lgtv.subscribe({ uri: "ssap://com.webos.applicationManager/getForegroundAppInfo" }, (res) => {
+    console.log(`Received response: ${JSON.stringify(res)}`);
+  });
+
+  lgtv.subscribe("ssap://audio/getVolume", (res) => {
+    console.log(`Received response: ${JSON.stringify(res)}`);
+
+    if (res.changed && res.changed.indexOf("volume") >= 0) {
+      console.log(`Volume changed: ${res.cause}`);
+      lgtv.close(); // Will reconnect after 5 seconds since reconnect is true
+    }
+    if (res.changed && res.changed.indexOf("muted") >= 0) {
+      console.log(`Mute changed: ${res.muted}`);
+    }
+  });
 });
 
 lgtv.on("close", () => {
@@ -32,27 +50,4 @@ lgtv.on("close", () => {
 
 lgtv.on("error", (error) => {
   console.log("error from lgtv", error);
-});
-
-// Requests and subscriptions are put in a queue and
-// run when connection is available
-
-lgtv.subscribe({ uri: "ssap://com.webos.service.mrcu/sensor/getSensorData" }, (res) => {
-  console.log(`Received response: ${JSON.stringify(res)}`);
-});
-
-lgtv.subscribe({ uri: "ssap://com.webos.applicationManager/getForegroundAppInfo" }, (res) => {
-  console.log(`Received response: ${JSON.stringify(res)}`);
-});
-
-lgtv.subscribe("ssap://audio/getVolume", (res) => {
-  console.log(`Received response: ${JSON.stringify(res)}`);
-
-  if (res.changed && res.changed.indexOf("volume") >= 0) {
-    console.log(`Volume changed: ${res.cause}`);
-    lgtv.close(); // Will reconnect after 5 seconds since reconnect is true
-  }
-  if (res.changed && res.changed.indexOf("muted") >= 0) {
-    console.log(`Mute changed: ${res.muted}`);
-  }
 });

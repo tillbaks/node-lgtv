@@ -193,4 +193,16 @@ lgtv.scroll = (value) => new Promise(async (resolve, reject) => {
   }
 })
 
+lgtv.click = (value) => new Promise(async (resolve, reject) => {
+  try {
+    socket = await getPointerInputSocket()
+    socket.send(`type:click\n\n`, (error) => {
+      if (error) reject (error)
+      else resolve()
+    })
+  } catch (error) {
+    reject(error)
+  }
+})
+
 module.exports = lgtv
